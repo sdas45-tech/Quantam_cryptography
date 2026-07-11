@@ -1,0 +1,25 @@
+# Python / Backend
+backend/venv/
+backend/__pycache__/
+backend/quantum.db
+backend/.pytest_cache/
+*.pyc
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
