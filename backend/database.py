@@ -1,17 +1,16 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Toggle database configuration (True for PostgreSQL, False for local SQLite)
-USE_POSTGRES = False
+import os
 
-if USE_POSTGRES:
-    # Connection URL format: postgresql://username:password@hostname:port/database_name
-    DATABASE_URL = "postgresql://postgres:postgres123@localhost:5432/quantum_cryptography"
-    engine = create_engine(DATABASE_URL)
-else:
-    DATABASE_URL = "sqlite:///./quantum.db"
-    # connect_args={"check_same_thread": False} is required only for SQLite
+# Read database URL from environment variable, fallback to local SQLite
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./quantum.db")
+
+# connect_args={"check_same_thread": False} is required only for SQLite
+if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

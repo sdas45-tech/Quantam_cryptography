@@ -1,0 +1,30 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+backend/venv/
+backend/quantum.db
+
+# Node / Next.js
+**/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+
+# Environment and secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Git and OS
+.git
+.gitignore
+.dockerignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

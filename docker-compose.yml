@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: quantum_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_DB: ${POSTGRES_DB:-quantum_cryptography}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-quantum_cryptography}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantum_backend
+    restart: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres123@db:5432/quantum_cryptography}
+      SECRET_KEY: ${JWT_SECRET:-QUANTUM_CRYPTOGRAPHY_SUPER_SECRET_KEY_JWT_TOKEN}
+      ALGORITHM: ${JWT_ALGORITHM:-HS256}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - quantum-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: quantum_frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - quantum-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  quantum-network:
+    driver: bridge

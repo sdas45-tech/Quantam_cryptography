@@ -7,3 +7,7 @@ passlib[bcrypt]
 bcrypt
 python-jose[cryptography]
 python-multipart
+cryptography
+websockets
+psycopg2-binary
+
