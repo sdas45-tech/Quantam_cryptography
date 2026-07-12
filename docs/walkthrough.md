@@ -65,4 +65,29 @@ Inside `docker-compose.yml`, the network is set up as follows:
    docker compose pull
    docker compose up -d --remove-orphans
    ```
-5. The containerized app updates instantly without downtime.
+ 5. The containerized app updates instantly without downtime.
+
+---
+
+## 🛠️ Recommended Stack Additions (OAuth, S3, SMTP, PWA)
+
+We integrated the remaining recommended technologies, all equipped with **failover/local development modes** so that developers can test them offline without needing secret tokens or production hosting APIs:
+
+1. **PWA Support:**
+   - Added [manifest.json](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/frontend/public/manifest.json) containing metadata for standalone progressive installation.
+   - Linked the manifest file in [layout.tsx](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/frontend/src/app/layout.tsx) so browser clients display installation promotions.
+
+2. **SMTP Email Verification:**
+   - Added a `send_otp_email` helper using `smtplib` and MIME HTML layouts.
+   - If `SMTP_HOST` environment configurations are missing, it falls back to printing the registration verification code to the console for developers.
+
+3. **AWS S3 File Storage:**
+   - Implemented `boto3` integration in the upload and download routes.
+   - If AWS credentials or bucket variables (`AWS_S3_BUCKET`) are set, files upload directly to S3.
+   - **Fallback:** If keys are unset, it falls back to saving base64 ciphertexts directly in SQLite/PostgreSQL columns.
+
+4. **Google OAuth Verification:**
+   - Created `/api/auth/google` POST endpoint in FastAPI.
+   - Added a **Sign in with Google** button in the React UI Auth modal.
+   - **Fallback:** Prompts developers for their email address and authenticates instantly under mock settings when developer keys are offline.
+
