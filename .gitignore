@@ -1,8 +1,8 @@
 # Python / Backend
 backend/venv/
-backend/__pycache__/
+__pycache__/
 backend/quantum.db
-backend/.pytest_cache/
+.pytest_cache/
 *.pyc
 
 # Node / Frontend
