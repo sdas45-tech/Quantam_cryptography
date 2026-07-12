@@ -1,7 +1,7 @@
 {
   "name": "Quantum Cryptography Portal",
   "short_name": "QKD Portal",
-  "description": "Enterprise-grade Quantum Key Distribution & Post-Quantum Cryptography Portal",
+  "description": "Visualize quantum key exchange, secure documents in the file locker, and encrypt communications with XOR cryptography.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",

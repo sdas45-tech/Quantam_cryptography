@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "BB84 Quantum Cryptography & Messenger Simulator",
-  description: "An interactive quantum cryptography simulator demonstrating the BB84 protocol. Generate secure keys, visualize eavesdropping detection (QBER), and encrypt/decrypt messages with XOR OTP.",
+  description: "Visualize quantum key exchange, secure documents in the file locker, and encrypt communications with XOR cryptography.",
   authors: [{ name: "Quantum Cryptography Lab" }],
   keywords: ["Quantum Cryptography", "BB84 Protocol", "Quantum Key Distribution", "QKD Simulation", "XOR Encryption"],
   manifest: "/manifest.json",
