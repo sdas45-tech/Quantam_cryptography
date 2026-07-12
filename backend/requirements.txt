@@ -10,4 +10,7 @@ python-multipart
 cryptography
 websockets
 psycopg2-binary
-
+pytest
+httpx
+alembic
+redis
