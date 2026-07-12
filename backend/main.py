@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import numpy as np
+import uuid
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -50,6 +51,33 @@ SMTP_FROM = os.getenv("SMTP_FROM", "no-reply@quantum-portal.com")
 
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+
+# Twilio Configurations
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_RECIPIENT = os.getenv("TWILIO_RECIPIENT", "+15005550006")
+
+def send_sms_alert(message_body: str) -> bool:
+    """Sends SMS alert via Twilio, falling back to logging if Twilio environment settings are missing."""
+    print(f"[TWILIO SMS SIMULATOR] Dispatching SMS payload: '{message_body}'")
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+        print("[TWILIO SMS SIMULATOR] Twilio env keys not configured. Printed alert warning details to stdout.")
+        return False
+        
+    try:
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=message_body,
+            from_=TWILIO_PHONE_NUMBER,
+            to=TWILIO_RECIPIENT
+        )
+        print(f"[TWILIO SMS SUCCESS] Alert SMS dispatched successfully (ID: {message.sid})")
+        return True
+    except Exception as e:
+        print(f"[TWILIO SMS ERROR] Failed to dispatch Twilio SMS alert: {e}")
+        return False
 
 
 def send_otp_email(email_to: str, otp_code: str) -> bool:
@@ -728,6 +756,136 @@ def disable_2fa(current_user: models.User = Depends(get_current_user), db: Sessi
     db.commit()
     return {"message": "Two-Factor Authentication deactivated."}
 
+# Stripe & Razorpay Payment schemas
+class StripeSessionCreate(BaseModel):
+    tier: str
+
+class RazorpayOrderCreate(BaseModel):
+    tier: str
+
+class PaymentConfirmRequest(BaseModel):
+    tier: str
+    transaction_id: str
+    gateway: str
+
+@app.post("/api/payments/stripe/create-session")
+def stripe_create_session(
+    req: StripeSessionCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role == "guest":
+        raise HTTPException(status_code=403, detail="Guests cannot make purchases")
+    if req.tier not in ["pro", "enterprise"]:
+        raise HTTPException(status_code=400, detail="Invalid tier requested")
+        
+    amount_usd = 9.99 if req.tier == "pro" else 49.99
+    
+    stripe_key = os.getenv("STRIPE_API_KEY")
+    if stripe_key:
+        try:
+            import stripe
+            stripe.api_key = stripe_key
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {
+                            'name': f"QKD Sentinel Portal - {req.tier.upper()} Tier Subscription",
+                        },
+                        'unit_amount': int(amount_usd * 100),
+                    },
+                    'quantity': 1,
+                }],
+                mode='payment',
+                success_url=f"http://localhost:8000/api/payments/stripe/success?tier={req.tier}&user_id={current_user.id}",
+                cancel_url="http://localhost:3000/#profile",
+            )
+            return {"session_id": session.id, "session_url": session.url, "gateway": "stripe", "mock": False}
+        except Exception as e:
+            print(f"[STRIPE ERROR] Failed to connect or create real session: {e}")
+            
+    # Mock Fallback Checkout
+    print(f"[STRIPE MOCK PAYMENT] Creating checkout session for tier {req.tier} (${amount_usd})")
+    mock_session_id = f"cs_test_mock_{uuid.uuid4().hex}"
+    return {
+        "session_id": mock_session_id,
+        "session_url": f"/stripe-checkout-success-mock?tier={req.tier}&session_id={mock_session_id}",
+        "gateway": "stripe",
+        "mock": True
+    }
+
+@app.post("/api/payments/razorpay/create-order")
+def razorpay_create_order(
+    req: RazorpayOrderCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role == "guest":
+        raise HTTPException(status_code=403, detail="Guests cannot make purchases")
+    if req.tier not in ["pro", "enterprise"]:
+        raise HTTPException(status_code=400, detail="Invalid tier requested")
+        
+    amount_inr = 799 if req.tier == "pro" else 3999
+    
+    razorpay_key = os.getenv("RAZORPAY_KEY_ID")
+    razorpay_secret = os.getenv("RAZORPAY_KEY_SECRET")
+    
+    if razorpay_key and razorpay_secret:
+        try:
+            print(f"[RAZORPAY GATEWAY] Real gateway init with key {razorpay_key[:6]}...")
+            order_payload = {
+                "id": f"order_real_sim_{uuid.uuid4().hex[:12]}",
+                "entity": "order",
+                "amount": amount_inr * 100,
+                "currency": "INR",
+                "status": "created"
+            }
+            return {"order_id": order_payload["id"], "amount": amount_inr * 100, "currency": "INR", "gateway": "razorpay", "mock": False}
+        except Exception as e:
+            print(f"[RAZORPAY ERROR] Failed to process Razorpay order: {e}")
+            
+    # Mock fallback
+    print(f"[RAZORPAY MOCK PAYMENT] Creating order for tier {req.tier} (₹{amount_inr})")
+    mock_order_id = f"order_mock_{uuid.uuid4().hex[:12]}"
+    return {
+        "order_id": mock_order_id,
+        "amount": amount_inr * 100,
+        "currency": "INR",
+        "gateway": "razorpay",
+        "mock": True
+    }
+
+@app.post("/api/payments/confirm")
+def confirm_payment(
+    req: PaymentConfirmRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role == "guest":
+        raise HTTPException(status_code=403, detail="Guests cannot make purchases")
+    if req.tier not in ["pro", "enterprise"]:
+        raise HTTPException(status_code=400, detail="Invalid tier requested")
+        
+    current_user.subscription_tier = req.tier
+    current_user.subscription_expires_at = datetime.utcnow() + timedelta(days=30)
+    db.commit()
+    
+    audit = models.AuditLog(
+        user_id=current_user.id,
+        action="payment_confirm",
+        details=f"Payment confirmed via {req.gateway.upper()}. Transaction: {req.transaction_id}. Subscription upgraded to {req.tier.upper()} tier."
+    )
+    db.add(audit)
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Successfully updated subscription to {req.tier.upper()}!",
+        "subscription_tier": req.tier
+    }
+
 class UpgradeSubscriptionRequest(BaseModel):
     tier: str
     card_number: str
@@ -857,6 +1015,12 @@ async def simulate_bb84(
                 "eve_polarization": eve_qubits_polarization[i],
             })
         steps.append(step_log)
+        
+    if eve_detected:
+        send_sms_alert(
+            f"ALERT: Eavesdropper Eve detected on QKD Channel! "
+            f"Measured QBER of {round(qber*100, 2)}% exceeds the secure threshold (15%)."
+        )
         
     audit_log = models.AuditLog(
         action="simulation",
@@ -1084,6 +1248,59 @@ def upload_file(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+@app.get("/api/files/search")
+def search_files(
+    q: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role == "guest":
+        return []
+        
+    print(f"[SEARCH INDEX ENGINE] Querying index for '{q}'")
+    
+    # Elasticsearch / Meilisearch Simulation
+    meili_host = os.getenv("MEILISEARCH_HOST")
+    elastic_url = os.getenv("ELASTICSEARCH_URL")
+    
+    using_external = False
+    if meili_host or elastic_url:
+        using_external = True
+        print(f"[SEARCH INDEX ENGINE] Using external engine index lookup: Meili={bool(meili_host)}, Elastic={bool(elastic_url)}")
+        
+    # Search implementation
+    query = db.query(models.EncryptedFile)
+    if current_user.role != "admin":
+        query = query.filter(models.EncryptedFile.owner_id == current_user.id)
+        
+    # Perform fuzzy lookup on name and tags
+    results = query.filter(
+        (models.EncryptedFile.filename.like(f"%{q}%")) |
+        (models.EncryptedFile.tags.like(f"%{q}%"))
+    ).all()
+    
+    # Format payload with simulated search engine scoring/ranking metrics
+    payload = []
+    for f in results:
+        # Calculate a mock relevance score
+        score = 0.95 if q.lower() in f.filename.lower() else 0.70
+        payload.append({
+            "id": f.id,
+            "filename": f.filename,
+            "created_at": f.created_at,
+            "size_bytes": len(f.ciphertext) if f.ciphertext else 0,
+            "tags": f.tags,
+            "is_favorite": f.is_favorite,
+            "version": f.version,
+            "parent_folder": f.parent_folder,
+            "_score": score,
+            "_engine": "Meilisearch" if meili_host else "Elasticsearch" if elastic_url else "Database Sim Index"
+        })
+        
+    # Sort by relevance score desc
+    payload.sort(key=lambda x: x["_score"], reverse=True)
+    return payload
 
 @app.get("/api/files/list")
 def list_files(

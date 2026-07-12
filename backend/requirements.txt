@@ -15,4 +15,5 @@ httpx
 alembic
 redis
 boto3
-
+stripe
+twilio

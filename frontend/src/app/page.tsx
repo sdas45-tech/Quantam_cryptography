@@ -278,6 +278,7 @@ export default function Home() {
   const [ccName, setCcName] = useState<string>("");
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentLoading, setPaymentLoading] = useState<boolean>(false);
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "stripe" | "razorpay">("card");
   
   // Custom metadata for uploads
   const [fileTags, setFileTags] = useState<string>("");
@@ -434,57 +435,124 @@ export default function Home() {
     setPaymentError(null);
     setPaymentLoading(true);
 
-    const cleanCard = ccNumber.replace(/\s+/g, "").replace(/-/g, "");
-    if (cleanCard.length !== 16 || isNaN(Number(cleanCard))) {
-      setPaymentError("Invalid Credit Card Number. Must be 16 digits.");
-      setPaymentLoading(false);
-      return;
-    }
-    if (!ccExpiry.match(/^(0[1-9]|1[0-2])\/?([0-9]{2})$/)) {
-      setPaymentError("Invalid Expiration Date. Format MM/YY.");
-      setPaymentLoading(false);
-      return;
-    }
-    if (ccCvv.length !== 3 || isNaN(Number(ccCvv))) {
-      setPaymentError("Invalid CVV. Must be 3 digits.");
-      setPaymentLoading(false);
-      return;
-    }
-    if (!ccName.trim()) {
-      setPaymentError("Cardholder Name is required.");
-      setPaymentLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/subscription/upgrade`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          tier: targetUpgradeTier,
-          card_number: ccNumber,
-          card_expiry: ccExpiry,
-          card_cvv: ccCvv,
-          card_name: ccName
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert(data.message);
-        setShowUpgradeModal(false);
-        setCcNumber("");
-        setCcExpiry("");
-        setCcCvv("");
-        setCcName("");
-        fetchProfile();
-      } else {
-        setPaymentError(data.detail || "Payment failed. Please try again.");
+    if (paymentMethod === "card") {
+      const cleanCard = ccNumber.replace(/\s+/g, "").replace(/-/g, "");
+      if (cleanCard.length !== 16 || isNaN(Number(cleanCard))) {
+        setPaymentError("Invalid Credit Card Number. Must be 16 digits.");
+        setPaymentLoading(false);
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      setPaymentError("Server connection error during payment processing.");
-    } finally {
-      setPaymentLoading(false);
+      if (!ccExpiry.match(/^(0[1-9]|1[0-2])\/?([0-9]{2})$/)) {
+        setPaymentError("Invalid Expiration Date. Format MM/YY.");
+        setPaymentLoading(false);
+        return;
+      }
+      if (ccCvv.length !== 3 || isNaN(Number(ccCvv))) {
+        setPaymentError("Invalid CVV. Must be 3 digits.");
+        setPaymentLoading(false);
+        return;
+      }
+      if (!ccName.trim()) {
+        setPaymentError("Cardholder Name is required.");
+        setPaymentLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/auth/subscription/upgrade`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({
+            tier: targetUpgradeTier,
+            card_number: ccNumber,
+            card_expiry: ccExpiry,
+            card_cvv: ccCvv,
+            card_name: ccName
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(data.message);
+          setShowUpgradeModal(false);
+          setCcNumber("");
+          setCcExpiry("");
+          setCcCvv("");
+          setCcName("");
+          fetchProfile();
+        } else {
+          setPaymentError(data.detail || "Payment failed");
+        }
+      } catch (err: any) {
+        setPaymentError("Server unreachable. Please try again.");
+      } finally {
+        setPaymentLoading(false);
+      }
+    } else if (paymentMethod === "stripe") {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/payments/stripe/create-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({ tier: targetUpgradeTier })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.mock) {
+            const confirmRes = await fetch(`${BACKEND_URL}/api/payments/confirm`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+              body: JSON.stringify({
+                tier: targetUpgradeTier,
+                transaction_id: data.session_id,
+                gateway: "stripe"
+              })
+            });
+            const confirmData = await confirmRes.json();
+            alert(`[Stripe Mock Checkout] Payment simulated successfully! ${confirmData.message}`);
+            setShowUpgradeModal(false);
+            fetchProfile();
+          } else {
+            window.open(data.session_url, "_blank");
+            alert("Redirecting you to Stripe secure payment checkout portal...");
+            setShowUpgradeModal(false);
+          }
+        } else {
+          setPaymentError(data.detail || "Failed to initialize Stripe session");
+        }
+      } catch (err) {
+        setPaymentError("Connection failure with Stripe gateway");
+      } finally {
+        setPaymentLoading(false);
+      }
+    } else if (paymentMethod === "razorpay") {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/payments/razorpay/create-order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({ tier: targetUpgradeTier })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const confirmRes = await fetch(`${BACKEND_URL}/api/payments/confirm`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({
+              tier: targetUpgradeTier,
+              transaction_id: data.order_id,
+              gateway: "razorpay"
+            })
+          });
+          const confirmData = await confirmRes.json();
+          alert(`[Razorpay Indian Gateway] Order created: ${data.order_id}. Simulating payment success: ${confirmData.message}`);
+          setShowUpgradeModal(false);
+          fetchProfile();
+        } else {
+          setPaymentError(data.detail || "Failed to initialize Razorpay order");
+        }
+      } catch (err) {
+        setPaymentError("Connection failure with Razorpay gateway");
+      } finally {
+        setPaymentLoading(false);
+      }
     }
   };
 
@@ -700,14 +768,18 @@ export default function Home() {
   const loadFiles = async () => {
     if (user?.role === "guest") return;
     try {
-      const params = new URLSearchParams();
-      params.append("folder", selectedFolder);
-      if (searchQuery) params.append("search", searchQuery);
-      if (tagFilter) params.append("tag", tagFilter);
-      if (favoritesOnly) params.append("favorites_only", "true");
-
-      const res = await fetch(`${BACKEND_URL}/api/files/list?${params.toString()}`, { headers: getAuthHeaders() });
-      if (res.ok) {
+      let res;
+      if (searchQuery) {
+        res = await fetch(`${BACKEND_URL}/api/files/search?q=${encodeURIComponent(searchQuery)}`, { headers: getAuthHeaders() });
+      } else {
+        const params = new URLSearchParams();
+        params.append("folder", selectedFolder);
+        if (tagFilter) params.append("tag", tagFilter);
+        if (favoritesOnly) params.append("favorites_only", "true");
+        res = await fetch(`${BACKEND_URL}/api/files/list?${params.toString()}`, { headers: getAuthHeaders() });
+      }
+      
+      if (res && res.ok) {
         const data = await res.json();
         setFilesList(data);
       }
@@ -3597,21 +3669,47 @@ export default function Home() {
               </div>
             )}
 
+            <div className="flex gap-2 mb-4 bg-bg-deep p-1 rounded-xl border border-border">
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${paymentMethod === "card" ? "bg-primary text-white" : "text-gray-400 hover:text-white"}`}
+                onClick={() => setPaymentMethod("card")}
+              >
+                💳 Card
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${paymentMethod === "stripe" ? "bg-primary text-white" : "text-gray-400 hover:text-white"}`}
+                onClick={() => setPaymentMethod("stripe")}
+              >
+                🌐 Stripe
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${paymentMethod === "razorpay" ? "bg-primary text-white" : "text-gray-400 hover:text-white"}`}
+                onClick={() => setPaymentMethod("razorpay")}
+              >
+                🇮🇳 Razorpay
+              </button>
+            </div>
+
             <form onSubmit={handleUpgradeSubscription} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block" htmlFor="cc-name">
-                  Cardholder Name
-                </label>
-                <input
-                  id="cc-name"
-                  type="text"
-                  required
-                  placeholder="John Doe"
-                  className="input-field"
-                  value={ccName}
-                  onChange={(e) => setCcName(e.target.value)}
-                />
-              </div>
+              {paymentMethod === "card" && (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block" htmlFor="cc-name">
+                      Cardholder Name
+                    </label>
+                    <input
+                      id="cc-name"
+                      type="text"
+                      required
+                      placeholder="John Doe"
+                      className="input-field"
+                      value={ccName}
+                      onChange={(e) => setCcName(e.target.value)}
+                    />
+                  </div>
 
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block" htmlFor="cc-number">
@@ -3668,8 +3766,10 @@ export default function Home() {
                   />
                 </div>
               </div>
+            </>
+          )}
 
-              <div className="text-[9px] text-gray-500 bg-bg-deep p-3 rounded-lg border border-border leading-normal">
+          <div className="text-[9px] text-gray-500 bg-bg-deep p-3 rounded-lg border border-border leading-normal">
                 🔒 Your transaction is encrypted using simulated AES-256 + BB84 hybrid keys. Enter any 16-digit card number to authorize.
               </div>
 
@@ -3678,7 +3778,10 @@ export default function Home() {
                 disabled={paymentLoading}
                 className="btn-primary w-full py-3 mt-4"
               >
-                {paymentLoading ? "Authorizing Payment..." : `Pay $${targetUpgradeTier === "pro" ? "10.00" : "49.00"} & Activate`}
+                {paymentLoading ? "Processing Transaction..." : 
+                 paymentMethod === "stripe" ? `Pay $${targetUpgradeTier === "pro" ? "9.99" : "49.99"} via Stripe` :
+                 paymentMethod === "razorpay" ? `Pay ₹${targetUpgradeTier === "pro" ? "799" : "3999"} via Razorpay` :
+                 `Pay $${targetUpgradeTier === "pro" ? "10.00" : "49.00"} via Card`}
               </button>
             </form>
           </div>

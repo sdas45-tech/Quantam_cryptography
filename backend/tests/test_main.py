@@ -60,3 +60,53 @@ def test_encrypt_endpoint():
     assert "hash" in data
     assert "signature" in data
     assert "public_key" in data
+
+def test_user_payments_and_search_integration():
+    """Verify that a registered operator user can run searches and create billing sessions."""
+    import random
+    unique_username = f"testpayuser_{random.randint(1000, 9999)}"
+    
+    # 1. Register test user
+    reg_payload = {
+        "username": unique_username,
+        "password": "SecurityPass123",
+        "full_name": "Test Billing User"
+    }
+    reg_res = client.post("/api/auth/register", json=reg_payload)
+    assert reg_res.status_code == 200
+    
+    # 2. Login to get token
+    login_payload = {
+        "username": unique_username,
+        "password": "SecurityPass123"
+    }
+    login_res = client.post("/api/auth/login", json=login_payload)
+    assert login_res.status_code == 200
+    token_data = login_res.json()
+    auth_headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+    
+    # 3. Create Stripe Session
+    stripe_res = client.post("/api/payments/stripe/create-session", json={"tier": "pro"}, headers=auth_headers)
+    assert stripe_res.status_code == 200
+    assert stripe_res.json()["gateway"] == "stripe"
+    
+    # 4. Create Razorpay Order
+    razorpay_res = client.post("/api/payments/razorpay/create-order", json={"tier": "enterprise"}, headers=auth_headers)
+    assert razorpay_res.status_code == 200
+    assert razorpay_res.json()["gateway"] == "razorpay"
+    
+    # 5. Confirm upgrade
+    confirm_payload = {
+        "tier": "enterprise",
+        "transaction_id": "test_transaction_id",
+        "gateway": "stripe"
+    }
+    confirm_res = client.post("/api/payments/confirm", json=confirm_payload, headers=auth_headers)
+    assert confirm_res.status_code == 200
+    assert confirm_res.json()["subscription_tier"] == "enterprise"
+    
+    # 6. Test search endpoint
+    search_res = client.get("/api/files/search?q=test", headers=auth_headers)
+    assert search_res.status_code == 200
+    assert isinstance(search_res.json(), list)
+
