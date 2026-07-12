@@ -102,6 +102,30 @@ Audited all **12 source files** across backend and frontend. Build verification 
 | **Root Cause** | Stale Python/uvicorn workers or stale Node/Next.js processes holding sockets; Next.js writing state lock files under `.next/dev/` |
 | **Fix** | Cleared stale listener PIDs on ports 3000, 3001, 8000; cleaned cache lock directories on the filesystem; and stopped conflicting background tasks to enable clean terminal runs. |
 
+### Bug 11 — Missing `boto3` dependency for S3 operations [RESOLVED]
+> **Severity: 🟡 MEDIUM** — Importing AWS S3 libraries crashes backend when `boto3` is not found
+
+| Detail | Value |
+|--------|-------|
+| **File** | [main.py](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/backend/main.py) |
+| **Fix** | Added `boto3` to [requirements.txt](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/backend/requirements.txt) and installed it in the workspace environment. |
+
+### Bug 12 — Missing `pytest` & `httpx` testing framework [RESOLVED]
+> **Severity: 🟢 LOW** — No backend testing coverage existed
+
+| Detail | Value |
+|--------|-------|
+| **File** | [test_main.py](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/backend/tests/test_main.py) |
+| **Fix** | Installed `pytest` and `httpx`, created the `/tests/` module, and added QKD simulation and crypto asserts. All 4 tests verified as passing. |
+
+### Bug 13 — CORS configuration constraints and static routing setup [RESOLVED]
+> **Severity: 🟡 MEDIUM** — Cross-Origin blocks when running Next.js and FastAPI on split ports
+
+| Detail | Value |
+|--------|-------|
+| **File** | [nginx.conf](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/nginx.conf) |
+| **Fix** | Set up Nginx reverse proxy serving Port 80, routing API calls relatively (`/api`) and resolving CORS policies natively. |
+
 ---
 
 ## Summary
@@ -109,7 +133,8 @@ Audited all **12 source files** across backend and frontend. Build verification 
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | 🔴 HIGH | 2 | 2 |
-| 🟡 MEDIUM | 2 | 2 |
-| 🟢 LOW | 6 | 2 |
+| 🟡 MEDIUM | 4 | 4 |
+| 🟢 LOW | 7 | 3 |
 
 **All HIGH and MEDIUM bugs are now fully resolved, and critical system operations are clean.**
+
