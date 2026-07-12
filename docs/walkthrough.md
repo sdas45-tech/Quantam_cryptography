@@ -89,5 +89,28 @@ We integrated the remaining recommended technologies, all equipped with **failov
 4. **Google OAuth Verification:**
    - Created `/api/auth/google` POST endpoint in FastAPI.
    - Added a **Sign in with Google** button in the React UI Auth modal.
-   - **Fallback:** Prompts developers for their email address and authenticates instantly under mock settings when developer keys are offline.
+    - **Fallback:** Prompts developers for their email address and authenticates instantly under mock settings when developer keys are offline.
 
+---
+
+## 💎 Optional Stack Extensions (Payments, Search, SMS, Analytics)
+
+We integrated the optional SaaS extensions requested, complete with simulated developer fallbacks:
+
+1. **Stripe & Razorpay Payment Gateways:**
+   - Implemented checkout sessions creation at `/api/payments/stripe/create-session` and `/api/payments/razorpay/create-order`.
+   - Wired payment method choices inside the frontend profile billing checkout terminal modal.
+   - **Fallback:** Simulates successful checkouts and redirects users directly to `/api/payments/confirm` upgrading subscription tier status to **Pro** or **Enterprise** instantly.
+
+2. **Elasticsearch & Meilisearch Index Lookup:**
+   - Created `/api/files/search` endpoint performing fuzzy name and tag lookup matching score indices.
+   - Replaced basic frontend search filters with index-based querying logic when search queries are typed.
+   - **Fallback:** Conducts native database index search operations when search servers are offline.
+
+3. **Twilio SMS Alerts:**
+   - Configured `send_sms_alert` helper triggered when simulator QBER exceeds secure limits (indicating eavesdropping).
+   - **Fallback:** Prints SMS warning alert details directly to standard output logging console.
+
+4. **Analytics Tracking (Clarity & Google Analytics):**
+   - Embedded script loading tags inside [layout.tsx](file:///c:/Users/Sibam%20Das/OneDrive/Desktop/quantam_cryptography/frontend/src/app/layout.tsx).
+   - Activates conditionally when `NEXT_PUBLIC_GA_ID` or `NEXT_PUBLIC_CLARITY_ID` are configured.
