@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   description: "An interactive quantum cryptography simulator demonstrating the BB84 protocol. Generate secure keys, visualize eavesdropping detection (QBER), and encrypt/decrypt messages with XOR OTP.",
   authors: [{ name: "Quantum Cryptography Lab" }],
   keywords: ["Quantum Cryptography", "BB84 Protocol", "Quantum Key Distribution", "QKD Simulation", "XOR Encryption"],
+  manifest: "/manifest.json",
 };
 
 import Providers from "@/context/Providers";

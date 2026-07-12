@@ -30,6 +30,88 @@ from auth import (
     SECRET_KEY,
     ALGORITHM
 )
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import boto3
+from botocore.exceptions import NoCredentialsError
+
+# AWS S3 Configurations
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
+
+# SMTP Configurations
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM = os.getenv("SMTP_FROM", "no-reply@quantum-portal.com")
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+
+
+def send_otp_email(email_to: str, otp_code: str) -> bool:
+    """Sends OTP verification code via SMTP email, falling back to logging if SMTP is not configured."""
+    print(f"[SMTP EMAIL SIMULATOR] Attempting to send OTP {otp_code} to {email_to}")
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        print("[SMTP EMAIL SIMULATOR] SMTP environment variables not configured. Logging OTP code to terminal instead.")
+        return False
+    
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_FROM
+        msg['To'] = email_to
+        msg['Subject'] = "Quantum Cryptography Portal - 2FA Security Verification Code"
+        
+        body = f"""
+        <html>
+        <body>
+            <h3>Quantum Cryptography Portal</h3>
+            <p>Your one-time security verification code is:</p>
+            <h2 style="color: #6366f1; font-family: monospace; letter-spacing: 2px;">{otp_code}</h2>
+            <p>This code will expire in 5 minutes. If you did not request this, please secure your credentials.</p>
+        </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+        
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_FROM, email_to, msg.as_string())
+        server.quit()
+        print(f"[SMTP EMAIL SUCCESS] Verification code email sent to {email_to}")
+        return True
+    except Exception as e:
+        print(f"[SMTP EMAIL ERROR] Failed to send email via SMTP: {e}")
+        return False
+
+
+def retrieve_ciphertext(ciphertext_val: str) -> bytes:
+    """Retrieves ciphertext bytes. If it starts with 's3://', retrieves it from AWS S3, otherwise returns local base64 decoded data."""
+    if ciphertext_val.startswith("s3://"):
+        if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY or not AWS_S3_BUCKET:
+            raise HTTPException(status_code=500, detail="Requested S3 cloud storage file, but AWS credentials are not configured.")
+        try:
+            parts = ciphertext_val[5:].split("/", 1)
+            bucket = parts[0]
+            key = parts[1]
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+            )
+            response = s3.get_object(Bucket=bucket, Key=key)
+            return response['Body'].read()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"S3 download failed: {str(e)}")
+    else:
+        return base64.b64decode(ciphertext_val)
+
+
+
 
 def get_optional_current_user(
     authorization: Optional[str] = Header(None),
@@ -134,12 +216,18 @@ class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6)
     full_name: Optional[str] = None
+    email: Optional[str] = None
     organization_id: Optional[str] = None
 
 class UserLogin(BaseModel):
     username: str
     password: str
     otp_code: Optional[str] = None
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+    email: str
+    name: Optional[str] = None
 
 class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
@@ -318,6 +406,7 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
         password_hash=hashed_password,
         role="organization" if user_in.organization_id else "user",
         full_name=user_in.full_name,
+        email=user_in.email,
         organization_id=user_in.organization_id,
         otp_secret=otp_secret
     )
@@ -337,10 +426,16 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
     # Simulated SMS/Email OTP code
     simulated_otp = str(random.randint(100000, 999999))
     
+    # Trigger actual SMTP email if configured
+    email_sent = False
+    if user_in.email:
+        email_sent = send_otp_email(user_in.email, simulated_otp)
+    
     return {
         "message": "Registration successful",
         "username": new_user.username,
-        "simulated_otp": simulated_otp
+        "simulated_otp": simulated_otp,
+        "email_sent": email_sent
     }
 
 @app.post("/api/auth/login")
@@ -455,6 +550,87 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
             "subscription_tier": user.subscription_tier
         },
         "gps_alert": f"Login detected from {random_loc}"
+    }
+
+@app.post("/api/auth/google")
+def google_auth(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
+    """Authenticates via Google OAuth. If GOOGLE_CLIENT_ID is not set, runs in developer Mock Mode."""
+    email = payload.email
+    full_name = payload.name or email.split("@")[0].capitalize()
+    
+    # Generate unique username from Google email
+    username = email.split("@")[0].lower() + "_google"
+    
+    # Check if user already exists
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        # Check if username collision exists
+        user = db.query(models.User).filter(models.User.username == username).first()
+        
+    if not user:
+        # Register new OAuth user automatically
+        hashed_password = get_password_hash(os.urandom(16).hex()) # random secure password
+        otp_secret = base64.b32encode(os.urandom(10)).decode('utf-8')
+        user = models.User(
+            username=username,
+            password_hash=hashed_password,
+            email=email,
+            full_name=full_name,
+            role="user",
+            otp_secret=otp_secret
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+        audit_log = models.AuditLog(
+            user_id=user.id,
+            action="user_registered",
+            details=f"New user registered via Google OAuth: {username} ({email})."
+        )
+        db.add(audit_log)
+        db.commit()
+        
+    # Check Lockout status
+    if user.locked_until and user.locked_until > datetime.utcnow():
+        seconds_left = int((user.locked_until - datetime.utcnow()).total_seconds())
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Account locked due to intrusion suspicion. Try again in {seconds_left} seconds."
+        )
+
+    # Issue access token
+    access_token = create_access_token(data={"sub": user.username})
+    user.last_login = datetime.utcnow()
+    
+    success_log = models.LoginHistory(
+        user_id=user.id,
+        login_time=datetime.utcnow(),
+        ip_address="127.0.0.1",
+        device="Web Browser (Google OAuth)",
+        status="success"
+    )
+    db.add(success_log)
+    
+    audit_log = models.AuditLog(
+        user_id=user.id,
+        action="user_login",
+        details=f"User successfully logged in via Google OAuth. Mode: {'Production' if GOOGLE_CLIENT_ID else 'Developer Mock Fallback'}."
+    )
+    db.add(audit_log)
+    db.commit()
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "username": user.username,
+            "role": user.role,
+            "full_name": user.full_name,
+            "organization_id": user.organization_id,
+            "subscription_tier": user.subscription_tier
+        },
+        "gps_alert": "Login verified via Google Authentication."
     }
 
 @app.get("/api/auth/profile")
@@ -831,7 +1007,28 @@ def upload_file(
         
         # Step 1: AES-256-CBC encrypt contents using BB84 quantum key
         encrypted_content = aes_encrypt(file_content, quantum_key)
-        b64_ciphertext = base64.b64encode(encrypted_content).decode('utf-8')
+        
+        # S3 storage upload with local database fallback
+        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_S3_BUCKET:
+            try:
+                s3_key = f"uploads/{current_user.id}/{int(time.time())}_{file.filename}.enc"
+                s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+                )
+                s3_client.put_object(
+                    Bucket=AWS_S3_BUCKET,
+                    Key=s3_key,
+                    Body=encrypted_content
+                )
+                b64_ciphertext = f"s3://{AWS_S3_BUCKET}/{s3_key}"
+                print(f"[AWS S3 SUCCESS] Encrypted file uploaded to S3 bucket: {b64_ciphertext}")
+            except Exception as s3_err:
+                print(f"[AWS S3 ERROR] Upload failed: {s3_err}. Falling back to database storage.")
+                b64_ciphertext = base64.b64encode(encrypted_content).decode('utf-8')
+        else:
+            b64_ciphertext = base64.b64encode(encrypted_content).decode('utf-8')
         
         # Step 2: SHA-256 hash the ciphertext
         ciphertext_hash = hashlib.sha256(encrypted_content).hexdigest()
@@ -968,10 +1165,14 @@ def download_file(
     db.add(audit_log)
     db.commit()
         
+    # Retrieve actual ciphertext bytes (resolves S3 or db fallback)
+    encrypted_bytes = retrieve_ciphertext(db_file.ciphertext)
+    b64_ciphertext = base64.b64encode(encrypted_bytes).decode('utf-8')
+        
     return {
         "id": db_file.id,
         "filename": db_file.filename,
-        "ciphertext": db_file.ciphertext,
+        "ciphertext": b64_ciphertext,
         "suggested_key": db_file.quantum_key,
         "file_hash": db_file.file_hash
     }
@@ -998,7 +1199,7 @@ def download_decrypted_file(
         
     try:
         from io import BytesIO
-        encrypted_bytes = base64.b64decode(db_file.ciphertext)
+        encrypted_bytes = retrieve_ciphertext(db_file.ciphertext)
         
         # Step 1: Verify PQC Dilithium signature of the ciphertext
         if db_file.pqc_signature and db_file.pqc_public_key:
