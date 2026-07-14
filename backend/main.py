@@ -251,11 +251,13 @@ class UserLogin(BaseModel):
     username: str
     password: str
     otp_code: Optional[str] = None
+    detected_location: Optional[str] = None
 
 class GoogleLoginRequest(BaseModel):
     id_token: str
     email: str
     name: Optional[str] = None
+    detected_location: Optional[str] = None
 
 class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
@@ -511,10 +513,13 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Incorrect username or password")
         
     # Login GPS Alerts Simulation
-    simulated_gps_locations = [
-        "Mumbai, India", "London, UK", "New York, USA", "Tokyo, Japan", "Berlin, Germany"
-    ]
-    random_loc = random.choice(simulated_gps_locations)
+    if credentials.detected_location:
+        random_loc = credentials.detected_location
+    else:
+        simulated_gps_locations = [
+            "Mumbai, India", "London, UK", "New York, USA", "Tokyo, Japan", "Berlin, Germany"
+        ]
+        random_loc = random.choice(simulated_gps_locations)
     
     # Reset failed counters
     user.failed_login_attempts = 0
@@ -632,10 +637,13 @@ def google_auth(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     
     # Login GPS Alerts Simulation
-    simulated_gps_locations = [
-        "Mumbai, India", "London, UK", "New York, USA", "Tokyo, Japan", "Berlin, Germany"
-    ]
-    random_loc = random.choice(simulated_gps_locations)
+    if payload.detected_location:
+        random_loc = payload.detected_location
+    else:
+        simulated_gps_locations = [
+            "Mumbai, India", "London, UK", "New York, USA", "Tokyo, Japan", "Berlin, Germany"
+        ]
+        random_loc = random.choice(simulated_gps_locations)
     
     success_log = models.LoginHistory(
         user_id=user.id,

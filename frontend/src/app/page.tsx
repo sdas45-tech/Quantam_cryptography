@@ -794,6 +794,54 @@ export default function Home() {
     }
   }, [selectedFolder, searchQuery, tagFilter, favoritesOnly, isAuthenticated]);
 
+  // Dynamically detect user's current geo-location via IP lookup api
+  const detectUserLocation = async (): Promise<string | undefined> => {
+    try {
+      // Fetching from ipapi.co (HTTPS compatible, fast, requires no permissions)
+      const geoRes = await fetch("https://ipapi.co/json/");
+      if (geoRes.ok) {
+        const data = await geoRes.json();
+        if (data.city && data.country_name) {
+          return `${data.city}, ${data.country_name}`;
+        }
+      }
+    } catch (e) {
+      console.log("IP Geolocation lookup failed: ", e);
+    }
+    
+    // Fallback: HTML5 Geolocation API (asks browser permission)
+    try {
+      if (navigator.geolocation) {
+        return new Promise<string | undefined>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+              const { latitude, longitude } = position.coords;
+              // Simple reverse lookup using openstreetmap (nominatim)
+              try {
+                const nominatimRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+                if (nominatimRes.ok) {
+                  const data = await nominatimRes.json();
+                  const city = data.address.city || data.address.town || data.address.village || data.address.suburb;
+                  const country = data.address.country;
+                  if (city && country) {
+                    resolve(`${city}, ${country}`);
+                    return;
+                  }
+                }
+              } catch {}
+              resolve(`Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`);
+            },
+            () => resolve(undefined),
+            { timeout: 3000 }
+          );
+        });
+      }
+    } catch (e) {
+      console.log("HTML5 Geolocation fallback failed: ", e);
+    }
+    return undefined;
+  };
+
   // Handle Authentication submit
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -802,13 +850,15 @@ export default function Home() {
 
     if (authType === "login") {
       try {
+        const detectedLoc = await detectUserLocation();
         const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             username: authUsername,
             password: authPassword,
-            otp_code: loginRequires2FA ? login2FACode : null
+            otp_code: loginRequires2FA ? login2FACode : null,
+            detected_location: detectedLoc
           }),
         });
         if (!res.ok) {
@@ -891,13 +941,15 @@ export default function Home() {
     }
     
     try {
+      const detectedLoc = await detectUserLocation();
       const res = await fetch(`${BACKEND_URL}/api/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id_token: "mock-google-id-token-xyz",
           email: mockEmail,
-          name: mockEmail.split("@")[0].charAt(0).toUpperCase() + mockEmail.split("@")[0].slice(1)
+          name: mockEmail.split("@")[0].charAt(0).toUpperCase() + mockEmail.split("@")[0].slice(1),
+          detected_location: detectedLoc
         })
       });
       if (!res.ok) {
