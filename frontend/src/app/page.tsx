@@ -337,9 +337,71 @@ export default function Home() {
 
   // General state alert warnings
   const [gpsLoginAlert, setGpsLoginAlert] = useState<string | null>(null);
+  const [detectedLocation, setDetectedLocation] = useState<string | null>(null);
+  const [detectingLoc, setDetectingLoc] = useState<boolean>(false);
   const [organizationId, setOrganizationId] = useState<string>("");
   const [qiskitSimulatorMode, setQiskitSimulatorMode] = useState<string>("numerical");
   const [showEmailTool, setShowEmailTool] = useState<boolean>(false);
+
+  // Trigger silent IP geolocation detection
+  const triggerLocationDetection = async () => {
+    setDetectingLoc(true);
+    try {
+      const loc = await fetch("https://ipapi.co/json/")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      if (loc && loc.city && loc.country_name) {
+        setDetectedLocation(`${loc.city}, ${loc.country_name}`);
+      } else {
+        setDetectedLocation("Kolkata, India"); // Dev fallback
+      }
+    } catch {
+      setDetectedLocation("Kolkata, India");
+    } finally {
+      setDetectingLoc(false);
+    }
+  };
+
+  // Trigger high-accuracy browser GPS permission prompt
+  const triggerGPSPermission = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setDetectingLoc(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          if (res.ok) {
+            const data = await res.json();
+            const city = data.address.city || data.address.town || data.address.village || data.address.suburb;
+            const country = data.address.country;
+            if (city && country) {
+              setDetectedLocation(`${city}, ${country}`);
+              setDetectingLoc(false);
+              return;
+            }
+          }
+        } catch {}
+        setDetectedLocation(`Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}`);
+        setDetectingLoc(false);
+      },
+      (error) => {
+        alert(`GPS detection failed: ${error.message}`);
+        setDetectingLoc(false);
+      },
+      { enableHighAccuracy: true, timeout: 6000 }
+    );
+  };
+
+  // Auto-detect location when login modal is opened
+  useEffect(() => {
+    if (showAuthModal && authType === "login" && !detectedLocation) {
+      triggerLocationDetection();
+    }
+  }, [showAuthModal, authType]);
   const [emailRecipient, setEmailRecipient] = useState<string>("");
   const [emailAttachmentText, setEmailAttachmentText] = useState<string>("");
   const [emailEncryptedOutput, setEmailEncryptedOutput] = useState<string>("");
@@ -794,54 +856,6 @@ export default function Home() {
     }
   }, [selectedFolder, searchQuery, tagFilter, favoritesOnly, isAuthenticated]);
 
-  // Dynamically detect user's current geo-location via IP lookup api
-  const detectUserLocation = async (): Promise<string | undefined> => {
-    try {
-      // Fetching from ipapi.co (HTTPS compatible, fast, requires no permissions)
-      const geoRes = await fetch("https://ipapi.co/json/");
-      if (geoRes.ok) {
-        const data = await geoRes.json();
-        if (data.city && data.country_name) {
-          return `${data.city}, ${data.country_name}`;
-        }
-      }
-    } catch (e) {
-      console.log("IP Geolocation lookup failed: ", e);
-    }
-    
-    // Fallback: HTML5 Geolocation API (asks browser permission)
-    try {
-      if (navigator.geolocation) {
-        return new Promise<string | undefined>((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              const { latitude, longitude } = position.coords;
-              // Simple reverse lookup using openstreetmap (nominatim)
-              try {
-                const nominatimRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-                if (nominatimRes.ok) {
-                  const data = await nominatimRes.json();
-                  const city = data.address.city || data.address.town || data.address.village || data.address.suburb;
-                  const country = data.address.country;
-                  if (city && country) {
-                    resolve(`${city}, ${country}`);
-                    return;
-                  }
-                }
-              } catch {}
-              resolve(`Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`);
-            },
-            () => resolve(undefined),
-            { timeout: 3000 }
-          );
-        });
-      }
-    } catch (e) {
-      console.log("HTML5 Geolocation fallback failed: ", e);
-    }
-    return undefined;
-  };
-
   // Handle Authentication submit
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -850,7 +864,6 @@ export default function Home() {
 
     if (authType === "login") {
       try {
-        const detectedLoc = await detectUserLocation();
         const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -858,7 +871,7 @@ export default function Home() {
             username: authUsername,
             password: authPassword,
             otp_code: loginRequires2FA ? login2FACode : null,
-            detected_location: detectedLoc
+            detected_location: detectedLocation
           }),
         });
         if (!res.ok) {
@@ -941,7 +954,6 @@ export default function Home() {
     }
     
     try {
-      const detectedLoc = await detectUserLocation();
       const res = await fetch(`${BACKEND_URL}/api/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -949,7 +961,7 @@ export default function Home() {
           id_token: "mock-google-id-token-xyz",
           email: mockEmail,
           name: mockEmail.split("@")[0].charAt(0).toUpperCase() + mockEmail.split("@")[0].slice(1),
-          detected_location: detectedLoc
+          detected_location: detectedLocation
         })
       });
       if (!res.ok) {
@@ -3151,6 +3163,48 @@ export default function Home() {
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
                   />
+                </div>
+              )}
+
+              {authType === "login" && (
+                <div className="space-y-1.5 p-3 bg-bg-deep rounded-xl border border-border/60">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">
+                      📍 Geo-Location Alert (Real-Time)
+                    </span>
+                    {detectingLoc ? (
+                      <span className="text-[9px] text-primary animate-pulse font-bold">DETECTING...</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={triggerLocationDetection}
+                        className="text-[9px] text-primary hover:underline font-bold bg-transparent border-0 cursor-pointer"
+                      >
+                        RE-DETECT
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      className="input-field py-1.5 text-xs flex-1 font-semibold"
+                      value={detectedLocation || ""}
+                      onChange={(e) => setDetectedLocation(e.target.value)}
+                      placeholder="e.g. Kolkata, India"
+                    />
+                    <button
+                      type="button"
+                      onClick={triggerGPSPermission}
+                      title="Use Browser GPS Coordinates"
+                      className="p-2 border border-border hover:border-primary/50 hover:bg-primary/10 rounded-lg text-sm flex items-center justify-center transition-all cursor-pointer"
+                    >
+                      🎯
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-gray-500 leading-normal">
+                    This location will be mapped dynamically to QKD Sentinel intrusion telemetry audit systems. You can manually override this value.
+                  </p>
                 </div>
               )}
 
