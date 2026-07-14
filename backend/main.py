@@ -1282,18 +1282,24 @@ def search_files(
     
     # Format payload with simulated search engine scoring/ranking metrics
     payload = []
+    now = datetime.utcnow()
     for f in results:
         # Calculate a mock relevance score
         score = 0.95 if q.lower() in f.filename.lower() else 0.70
+        owner_user = db.query(models.User).filter(models.User.id == f.owner_id).first()
+        owner_name = owner_user.username if owner_user else "unknown"
         payload.append({
             "id": f.id,
             "filename": f.filename,
             "created_at": f.created_at,
-            "size_bytes": len(f.ciphertext) if f.ciphertext else 0,
+            "owner": owner_name,
             "tags": f.tags,
             "is_favorite": f.is_favorite,
             "version": f.version,
-            "parent_folder": f.parent_folder,
+            "file_hash": f.file_hash,
+            "expires_at": f.expires_at,
+            "has_share_link": f.sharing_expires_at is not None and f.sharing_expires_at > now,
+            "pqc_signed": f.pqc_signature is not None,
             "_score": score,
             "_engine": "Meilisearch" if meili_host else "Elasticsearch" if elastic_url else "Database Sim Index"
         })
