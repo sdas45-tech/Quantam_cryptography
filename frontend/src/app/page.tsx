@@ -906,6 +906,10 @@ export default function Home() {
       }
       const data = await res.json();
       login(data.access_token, data.user);
+      if (data.gps_alert) {
+        setGpsLoginAlert(data.gps_alert);
+        setTimeout(() => setGpsLoginAlert(null), 10000);
+      }
       setShowAuthModal(false);
       setAuthUsername("");
       setAuthPassword("");

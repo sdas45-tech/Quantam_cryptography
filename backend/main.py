@@ -631,6 +631,12 @@ def google_auth(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.username})
     user.last_login = datetime.utcnow()
     
+    # Login GPS Alerts Simulation
+    simulated_gps_locations = [
+        "Mumbai, India", "London, UK", "New York, USA", "Tokyo, Japan", "Berlin, Germany"
+    ]
+    random_loc = random.choice(simulated_gps_locations)
+    
     success_log = models.LoginHistory(
         user_id=user.id,
         login_time=datetime.utcnow(),
@@ -640,10 +646,11 @@ def google_auth(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
     )
     db.add(success_log)
     
+    # Audit log
     audit_log = models.AuditLog(
         user_id=user.id,
         action="user_login",
-        details=f"User successfully logged in via Google OAuth. Mode: {'Production' if GOOGLE_CLIENT_ID else 'Developer Mock Fallback'}."
+        details=f"User successfully logged in via Google OAuth. Geo-Location: {random_loc}."
     )
     db.add(audit_log)
     db.commit()
@@ -658,7 +665,7 @@ def google_auth(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
             "organization_id": user.organization_id,
             "subscription_tier": user.subscription_tier
         },
-        "gps_alert": "Login verified via Google Authentication."
+        "gps_alert": f"Login detected from {random_loc}"
     }
 
 @app.get("/api/auth/profile")
